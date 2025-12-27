@@ -297,19 +297,40 @@ export class ToolsService implements IToolsService {
 			read_file: async ({ uri, startLine, endLine, pageNumber }) => {
 				await voidModelService.initializeModel(uri)
 				const { model } = await voidModelService.getModelSafe(uri)
-				if (model === null) { throw new Error(`No contents; File does not exist.`) }
 
 				let contents: string
-				if (startLine === null && endLine === null) {
-					contents = model.getValue(EndOfLinePreference.LF)
-				}
-				else {
-					const startLineNumber = startLine === null ? 1 : startLine
-					const endLineNumber = endLine === null ? model.getLineCount() : endLine
-					contents = model.getValueInRange({ startLineNumber, startColumn: 1, endLineNumber, endColumn: Number.MAX_SAFE_INTEGER }, EndOfLinePreference.LF)
-				}
+				let totalNumLines: number
 
-				const totalNumLines = model.getLineCount()
+				// If model initialization failed (e.g., file outside workspace), fall back to direct file read
+				if (model === null) {
+					try {
+						const fileContent = await fileService.readFile(uri)
+						const allContents = fileContent.value.toString()
+						const allLines = allContents.split('\n')
+						totalNumLines = allLines.length
+
+						// Handle line range selection
+						if (startLine !== null || endLine !== null) {
+							const startLineNumber = startLine === null ? 1 : Math.max(1, startLine)
+							const endLineNumber = endLine === null ? totalNumLines : Math.min(totalNumLines, endLine)
+							contents = allLines.slice(startLineNumber - 1, endLineNumber).join('\n')
+						} else {
+							contents = allContents
+						}
+					} catch (e) {
+						throw new Error(`No contents; File does not exist or cannot be read: ${e}`)
+					}
+				} else {
+					if (startLine === null && endLine === null) {
+						contents = model.getValue(EndOfLinePreference.LF)
+					}
+					else {
+						const startLineNumber = startLine === null ? 1 : startLine
+						const endLineNumber = endLine === null ? model.getLineCount() : endLine
+						contents = model.getValueInRange({ startLineNumber, startColumn: 1, endLineNumber, endColumn: Number.MAX_SAFE_INTEGER }, EndOfLinePreference.LF)
+					}
+					totalNumLines = model.getLineCount()
+				}
 
 				const fromIdx = MAX_FILE_CHARS_PAGE * (pageNumber - 1)
 				const toIdx = MAX_FILE_CHARS_PAGE * pageNumber - 1
@@ -372,8 +393,20 @@ export class ToolsService implements IToolsService {
 			search_in_file: async ({ uri, query, isRegex }) => {
 				await voidModelService.initializeModel(uri);
 				const { model } = await voidModelService.getModelSafe(uri);
-				if (model === null) { throw new Error(`No contents; File does not exist.`); }
-				const contents = model.getValue(EndOfLinePreference.LF);
+
+				let contents: string
+				// If model initialization failed (e.g., file outside workspace), fall back to direct file read
+				if (model === null) {
+					try {
+						const fileContent = await fileService.readFile(uri)
+						contents = fileContent.value.toString()
+					} catch (e) {
+						throw new Error(`No contents; File does not exist or cannot be read: ${e}`)
+					}
+				} else {
+					contents = model.getValue(EndOfLinePreference.LF);
+				}
+
 				const contentOfLine = contents.split('\n');
 				const totalLines = contentOfLine.length;
 				const regex = isRegex ? new RegExp(query) : null;
@@ -493,7 +526,11 @@ export class ToolsService implements IToolsService {
 			},
 			search_in_file: (params, result) => {
 				const { model } = voidModelService.getModel(params.uri)
-				if (!model) return '<Error getting string of result>'
+				if (!model) {
+					// If model is not available (e.g., file outside workspace), return line numbers only
+					// The actual file content was already read in callTool, so we just return the line numbers
+					return result.lines.map(n => `Line ${n}: (match found)`).join('\n');
+				}
 				const lines = result.lines.map(n => {
 					const lineContent = model.getValueInRange({ startLineNumber: n, startColumn: 1, endLineNumber: n, endColumn: Number.MAX_SAFE_INTEGER }, EndOfLinePreference.LF)
 					return `Line ${n}:\n\`\`\`\n${lineContent}\n\`\`\``
