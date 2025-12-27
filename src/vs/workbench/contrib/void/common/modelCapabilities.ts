@@ -349,6 +349,7 @@ const openSourceModelOptions_assumingOAICompat = {
 	'qwen2.5coder': {
 		supportsFIM: true,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 		contextWindow: 32_000, reservedOutputTokenSpace: 4_096,
 	},
@@ -361,6 +362,7 @@ const openSourceModelOptions_assumingOAICompat = {
 	'qwen3': {
 		supportsFIM: false, // replaces QwQ
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { supportsReasoning: true, canTurnOffReasoning: true, canIOReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
 		contextWindow: 32_768, reservedOutputTokenSpace: 8_192,
 	},
@@ -1143,6 +1145,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 1.9 },
 		supportsFIM: true,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 	},
 	'qwen2.5-coder:3b': {
@@ -1152,6 +1155,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 1.9 },
 		supportsFIM: true,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 	},
 	'qwen2.5-coder:1.5b': {
@@ -1161,6 +1165,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: .986 },
 		supportsFIM: true,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 	},
 	'llama3.1': {
@@ -1170,6 +1175,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 4.9 },
 		supportsFIM: false,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 	},
 	'qwen2.5-coder': {
@@ -1179,6 +1185,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 4.7 },
 		supportsFIM: false,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 	},
 	'qwq': {
@@ -1188,6 +1195,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 20 },
 		supportsFIM: false,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: false, canTurnOffReasoning: false, openSourceThinkTags: ['<think>', '</think>'] },
 	},
 	'deepseek-r1': {
@@ -1197,6 +1205,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 4.7 },
 		supportsFIM: false,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: false, canTurnOffReasoning: false, openSourceThinkTags: ['<think>', '</think>'] },
 	},
 	'devstral:latest': {
@@ -1206,6 +1215,7 @@ const ollamaModelOptions = {
 		downloadable: { sizeGb: 14 },
 		supportsFIM: false,
 		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
 	},
 
@@ -1234,7 +1244,14 @@ const lmStudioSettings: VoidStaticProviderInfo = {
 }
 
 const ollamaSettings: VoidStaticProviderInfo = {
-	modelOptionsFallback: (modelName) => extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' } }),
+	modelOptionsFallback: (modelName) => {
+		const fallback = extensiveModelOptionsFallback(modelName, { downloadable: { sizeGb: 'not-known' }, specialToolFormat: 'openai-style' })
+		// Ensure all Ollama models use OpenAI-style tools since Ollama uses OpenAI-compatible API
+		if (fallback && !fallback.specialToolFormat) {
+			fallback.specialToolFormat = 'openai-style'
+		}
+		return fallback
+	},
 	modelOptions: ollamaModelOptions,
 	providerReasoningIOSettings: {
 		// reasoning: we need to filter out reasoning <think> tags manually
