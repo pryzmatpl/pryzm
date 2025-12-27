@@ -49,7 +49,11 @@ class VoidModelService extends Disposable implements IVoidModelService {
 			this._modelRefOfURI[uri.fsPath] = editorModelRef;
 		}
 		catch (e) {
-			console.log('InitializeModel error:', e)
+			// Only log errors that aren't "file not found" - missing files are expected
+			const errorMessage = e instanceof Error ? e.message : String(e);
+			if (!errorMessage.includes('nonexistent file') && !errorMessage.includes('Unable to resolve')) {
+				console.log('InitializeModel error:', e)
+			}
 		}
 	};
 
