@@ -267,6 +267,10 @@ export class ToolsService implements IToolsService {
 
 			run_command: (params: RawToolParamsObj) => {
 				const { command: commandUnknown, cwd: cwdUnknown } = params
+				// Provide better error message if command is missing
+				if (commandUnknown === undefined || commandUnknown === null) {
+					throw new Error(`Invalid LLM output: The 'command' parameter is required for run_command. Received parameters: ${JSON.stringify(params)}. Please provide the command as a string, e.g., {"command": "cat Cargo.toml"}`)
+				}
 				const command = validateStr('command', commandUnknown)
 				const cwd = validateOptionalStr('cwd', cwdUnknown)
 				const terminalId = generateUuid()

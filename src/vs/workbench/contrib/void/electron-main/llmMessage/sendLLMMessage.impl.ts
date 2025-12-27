@@ -214,6 +214,12 @@ const toOpenAICompatibleTool = (toolInfo: InternalToolInfo) => {
 	const paramsWithType: { [s: string]: { description: string; type: 'string' } } = {}
 	for (const key in params) { paramsWithType[key] = { ...params[key], type: 'string' } }
 
+	// Determine required parameters based on tool name
+	const requiredParams: string[] = []
+	if (name === 'run_command' || name === 'run_persistent_command') {
+		requiredParams.push('command')
+	}
+
 	return {
 		type: 'function',
 		function: {
@@ -223,7 +229,7 @@ const toOpenAICompatibleTool = (toolInfo: InternalToolInfo) => {
 			parameters: {
 				type: 'object',
 				properties: params,
-				// required: Object.keys(params), // in strict mode, all params are required and additionalProperties is false
+				...(requiredParams.length > 0 ? { required: requiredParams } : {}),
 				// additionalProperties: false,
 			},
 		}

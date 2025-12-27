@@ -307,7 +307,7 @@ export const builtinTools: {
 		name: 'run_command',
 		description: `Runs a terminal command and waits for the result (times out after ${MAX_TERMINAL_INACTIVE_TIME}s of inactivity). ${terminalDescHelper}`,
 		params: {
-			command: { description: 'The terminal command to run.' },
+			command: { description: 'REQUIRED. The terminal command to run as a string. Example: "cat Cargo.toml" or "ls -la".' },
 			cwd: { description: cwdHelper },
 		},
 	},
