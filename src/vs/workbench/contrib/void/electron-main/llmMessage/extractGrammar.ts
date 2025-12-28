@@ -139,6 +139,69 @@ export const extractReasoningWrapper = (
 }
 
 
+// =============== tools (JSON fallback) ===============
+
+// Try to detect and parse JSON tool calls that some models output as text
+// Format: {"name":"tool_name", "arguments":{"param":"value"}}
+const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj | null => {
+	// Look for JSON object pattern that contains "name" and "arguments"
+	const jsonPattern = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"([^"]+)"[\s\n]*,[\s\n]*"arguments"[\s\n]*:[\s\n]*(\{[^}]*\})[\s\n]*\}/g
+
+	let match: RegExpExecArray | null
+	while ((match = jsonPattern.exec(text)) !== null) {
+		const toolName = match[1]
+		const argsStr = match[2]
+
+		// Check if this is a valid tool name
+		if (toolNames.includes(toolName)) {
+			try {
+				const args = JSON.parse(argsStr)
+				const rawParams: RawToolParamsObj = {}
+				for (const key in args) {
+					rawParams[key] = String(args[key])
+				}
+				return {
+					name: toolName as ToolName,
+					rawParams,
+					doneParams: Object.keys(rawParams) as any[],
+					isDone: true,
+					id: generateUuid(),
+				}
+			} catch (e) {
+				// JSON parse failed, continue looking
+			}
+		}
+	}
+
+	// Also try format with "parameters" instead of "arguments"
+	const jsonPattern2 = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"([^"]+)"[\s\n]*,[\s\n]*"parameters"[\s\n]*:[\s\n]*(\{[^}]*\})[\s\n]*\}/g
+	while ((match = jsonPattern2.exec(text)) !== null) {
+		const toolName = match[1]
+		const argsStr = match[2]
+
+		if (toolNames.includes(toolName)) {
+			try {
+				const args = JSON.parse(argsStr)
+				const rawParams: RawToolParamsObj = {}
+				for (const key in args) {
+					rawParams[key] = String(args[key])
+				}
+				return {
+					name: toolName as ToolName,
+					rawParams,
+					doneParams: Object.keys(rawParams) as any[],
+					isDone: true,
+					id: generateUuid(),
+				}
+			} catch (e) {
+				// JSON parse failed, continue looking
+			}
+		}
+	}
+
+	return null
+}
+
 // =============== tools (XML) ===============
 
 
@@ -347,9 +410,23 @@ export const extractXMLToolsWrapper = (
 		newOnText({ ...params })
 
 		fullText = fullText.trimEnd()
-		const toolCall = latestToolCall
+		let toolCall = latestToolCall
 
-		console.log('[Void Tool Detection] Final message received:', {
+		// If no XML tool call found, try to parse JSON tool calls as fallback
+		// Some models (like Qwen via Ollama) output JSON instead of XML
+		if (!toolCall) {
+			const toolNames = tools.map(t => t.name)
+			const jsonToolCall = tryParseJSONToolCall(trueFullText, toolNames)
+			if (jsonToolCall) {
+				toolCall = jsonToolCall
+				// Remove the JSON from the displayed text
+				const jsonPattern = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"[^"]+?"[\s\n]*,[\s\n]*"(?:arguments|parameters)"[\s\n]*:[\s\n]*\{[^}]*\}[\s\n]*\}/g
+				fullText = trueFullText.replace(jsonPattern, '').trimEnd()
+				console.log('[PRYZM Tool Detection] Found JSON tool call as fallback')
+			}
+		}
+
+		console.log('[PRYZM Tool Detection] Final message received:', {
 			hasToolCall: !!toolCall,
 			toolName: toolCall?.name,
 			toolIsDone: toolCall?.isDone,
@@ -358,7 +435,7 @@ export const extractXMLToolsWrapper = (
 			trueFullTextLength: trueFullText.length,
 		})
 		if (toolCall) {
-			console.log('[Void Tool Detection] Parsed tool call:', JSON.stringify(toolCall, null, 2))
+			console.log('[PRYZM Tool Detection] Parsed tool call:', JSON.stringify(toolCall, null, 2))
 		}
 
 		onFinalMessage({ ...params, fullText, toolCall: toolCall })
