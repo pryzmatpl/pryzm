@@ -1,4 +1,4 @@
-# Welcome to Void.
+# Welcome to Pryzm, a PRIZM fork of the OSS Void.
 
 <div align="center">
 	<img
