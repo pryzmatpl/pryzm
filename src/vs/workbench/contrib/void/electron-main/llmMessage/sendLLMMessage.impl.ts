@@ -369,10 +369,22 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				}
 
 				// call onText
+				// Parse tool params during streaming if we have accumulated enough
+				let streamingToolCall: RawToolCallObj | undefined = undefined
+				if (toolName && toolParamsStr) {
+					try {
+						const parsedParams = JSON.parse(toolParamsStr)
+						if (typeof parsedParams === 'object' && parsedParams !== null) {
+							streamingToolCall = { name: toolName, rawParams: parsedParams, isDone: false, doneParams: Object.keys(parsedParams), id: toolId }
+						}
+					} catch (e) {
+						// JSON might be incomplete during streaming, that's okay - we'll parse it in the final message
+					}
+				}
 				onText({
 					fullText: fullTextSoFar,
 					fullReasoning: fullReasoningSoFar,
-					toolCall: !toolName ? undefined : { name: toolName, rawParams: {}, isDone: false, doneParams: [], id: toolId },
+					toolCall: streamingToolCall,
 				})
 
 			}

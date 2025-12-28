@@ -349,10 +349,17 @@ export const extractXMLToolsWrapper = (
 		fullText = fullText.trimEnd()
 		const toolCall = latestToolCall
 
-		// console.log('final message!!!', trueFullText)
-		// console.log('----- returning ----\n', fullText)
-		// console.log('----- tools ----\n', JSON.stringify(firstToolCallRef.current, null, 2))
-		// console.log('----- toolCall ----\n', JSON.stringify(toolCall, null, 2))
+		console.log('[Void Tool Detection] Final message received:', {
+			hasToolCall: !!toolCall,
+			toolName: toolCall?.name,
+			toolIsDone: toolCall?.isDone,
+			foundOpenTag: foundOpenTag,
+			fullTextLength: fullText.length,
+			trueFullTextLength: trueFullText.length,
+		})
+		if (toolCall) {
+			console.log('[Void Tool Detection] Parsed tool call:', JSON.stringify(toolCall, null, 2))
+		}
 
 		onFinalMessage({ ...params, fullText, toolCall: toolCall })
 	}

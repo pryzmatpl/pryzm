@@ -414,7 +414,9 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
     - After you write the tool call, you must STOP and WAIT for the result.
     - All parameters are REQUIRED unless noted otherwise.
     - You are only allowed to output ONE tool call, and it must be at the END of your response.
-    - Your tool call will be executed immediately, and the results will appear in the following user message.`)
+    - Your tool call will be executed immediately, and the results will appear in the following user message.
+    - IMPORTANT: All file paths (uri parameter) must be ABSOLUTE paths starting from the workspace root. Use the workspace root path shown in system_info as the base for all file operations.
+    - When the user asks for a file by name, first use ls_dir or search_pathnames_only to find its full path, then use that full path in subsequent tool calls.`)
 
 	return `\
     ${toolXMLDefinitions}
@@ -436,12 +438,19 @@ Please assist the user with their query.`)
 
 
 
+	const workspaceRootInfo = workspaceFolders.length > 0
+		? `WORKSPACE ROOT: ${workspaceFolders[0]}
+All file operations should use this as the base directory. When the user asks for a file by name (e.g., "read PKGBUILD"), search for it within this workspace.`
+		: 'NO WORKSPACE OPEN - Cannot perform file operations without an open workspace.'
+
 	const sysInfo = (`Here is the user's system information:
 <system_info>
 - ${os}
 
-- The user's workspace contains these folders:
-${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
+- ${workspaceRootInfo}
+${workspaceFolders.length > 1 ? `
+- Additional workspace folders:
+${workspaceFolders.slice(1).join('\n')}` : ''}
 
 - Active file:
 ${activeURI}

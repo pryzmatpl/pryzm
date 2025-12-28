@@ -610,6 +610,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		opts: { preapproved: true, unvalidatedToolParams: RawToolParamsObj, validatedParams: ToolCallParams<ToolName> } | { preapproved: false, unvalidatedToolParams: RawToolParamsObj },
 	): Promise<{ awaitingUserApproval?: boolean, interrupted?: boolean }> => {
 
+		console.log(`[Void Tool Call] Starting tool execution:`, { toolName, toolId, params: opts.unvalidatedToolParams })
+
 		// compute these below
 		let toolParams: ToolCallParams<ToolName>
 		let toolResult: ToolResult<ToolName>
@@ -876,6 +878,11 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 				// llm res success
 				const { toolCall, info } = llmRes
+
+				console.log(`[Void Tool Call] LLM response received:`, { hasToolCall: !!toolCall, toolName: toolCall?.name, textLength: info.fullText.length })
+				if (toolCall) {
+					console.log(`[Void Tool Call] Detected tool call:`, { name: toolCall.name, id: toolCall.id, params: toolCall.rawParams, isDone: toolCall.isDone })
+				}
 
 				this._addMessageToThread(threadId, { role: 'assistant', displayContent: info.fullText, reasoning: info.fullReasoning, anthropicReasoning: info.anthropicReasoning })
 

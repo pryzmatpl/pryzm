@@ -37,11 +37,47 @@ const validateStr = (argName: string, value: unknown) => {
 	return value
 }
 
+// Check if a path is absolute (starts with / on Unix or drive letter on Windows)
+const isAbsolutePath = (path: string): boolean => {
+	// Unix absolute path
+	if (path.startsWith('/')) return true
+	// Windows absolute path (e.g., C:\, D:\)
+	if (/^[a-zA-Z]:[\\/]/.test(path)) return true
+	return false
+}
+
+// Resolve a path against the workspace root if it's relative
+const resolvePathAgainstWorkspace = (pathStr: string, workspaceContextService: IWorkspaceContextService): string => {
+	// If already absolute or has scheme, return as-is
+	if (isAbsolutePath(pathStr) || pathStr.includes('://')) {
+		return pathStr
+	}
+
+	// Get the first workspace folder as the root
+	const workspaceFolders = workspaceContextService.getWorkspace().folders
+	if (workspaceFolders.length === 0) {
+		// No workspace open, return as-is and let it fail later
+		return pathStr
+	}
+
+	const workspaceRoot = workspaceFolders[0].uri.fsPath
+	// Join workspace root with the relative path
+	// Handle both forward and back slashes
+	const separator = workspaceRoot.includes('\\') ? '\\' : '/'
+	const resolvedPath = `${workspaceRoot}${separator}${pathStr.replace(/^[./\\]+/, '')}`
+	return resolvedPath
+}
 
 // We are NOT checking to make sure in workspace
-const validateURI = (uriStr: unknown) => {
+const validateURI = (uriStr: unknown, workspaceContextService?: IWorkspaceContextService) => {
 	if (uriStr === null) throw new Error(`Invalid LLM output: uri was null.`)
 	if (typeof uriStr !== 'string') throw new Error(`Invalid LLM output format: Provided uri must be a string, but it's a(n) ${typeof uriStr}. Full value: ${JSON.stringify(uriStr)}.`)
+
+	// Resolve relative paths against workspace root
+	let resolvedUriStr = uriStr
+	if (workspaceContextService && !uriStr.includes('://') && !isAbsolutePath(uriStr)) {
+		resolvedUriStr = resolvePathAgainstWorkspace(uriStr, workspaceContextService)
+	}
 
 	// Check if it's already a full URI with scheme (e.g., vscode-remote://, file://, etc.)
 	// Look for :// pattern which indicates a scheme is present
@@ -51,25 +87,25 @@ const validateURI = (uriStr: unknown) => {
 	// - file:///home/user/file.txt (local file with scheme)
 	// - /home/user/file.txt (local file path, will be converted to file://)
 	// - C:\Users\file.txt (Windows local path, will be converted to file://)
-	if (uriStr.includes('://')) {
+	if (resolvedUriStr.includes('://')) {
 		try {
-			const uri = URI.parse(uriStr)
+			const uri = URI.parse(resolvedUriStr)
 			return uri
 		} catch (e) {
 			// If parsing fails, it's a malformed URI
-			throw new Error(`Invalid URI format: ${uriStr}. Error: ${e}`)
+			throw new Error(`Invalid URI format: ${resolvedUriStr}. Error: ${e}`)
 		}
 	} else {
 		// No scheme present, treat as file path
 		// This handles regular file paths like /home/user/file.txt or C:\Users\file.txt
-		const uri = URI.file(uriStr)
+		const uri = URI.file(resolvedUriStr)
 		return uri
 	}
 }
 
-const validateOptionalURI = (uriStr: unknown) => {
+const validateOptionalURI = (uriStr: unknown, workspaceContextService?: IWorkspaceContextService) => {
 	if (isFalsy(uriStr)) return null
-	return validateURI(uriStr)
+	return validateURI(uriStr, workspaceContextService)
 }
 
 const validateOptionalStr = (argName: string, str: unknown) => {
@@ -159,7 +195,7 @@ export class ToolsService implements IToolsService {
 		this.validateParams = {
 			read_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, start_line: startLineUnknown, end_line: endLineUnknown, page_number: pageNumberUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const pageNumber = validatePageNum(pageNumberUnknown)
 
 				let startLine = validateNumber(startLineUnknown, { default: null })
@@ -173,13 +209,23 @@ export class ToolsService implements IToolsService {
 			ls_dir: (params: RawToolParamsObj) => {
 				const { uri: uriStr, page_number: pageNumberUnknown } = params
 
-				const uri = validateURI(uriStr)
+				// Default to first workspace folder if URI is empty or not provided
+				let uri: URI
+				if (isFalsy(uriStr) || uriStr === '') {
+					const workspaceFolders = workspaceContextService.getWorkspace().folders
+					if (workspaceFolders.length === 0) {
+						throw new Error('No workspace folder is open. Please specify a URI.')
+					}
+					uri = workspaceFolders[0].uri
+				} else {
+					uri = validateURI(uriStr, workspaceContextService)
+				}
 				const pageNumber = validatePageNum(pageNumberUnknown)
 				return { uri, pageNumber }
 			},
 			get_dir_tree: (params: RawToolParamsObj) => {
 				const { uri: uriStr, } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				return { uri }
 			},
 			search_pathnames_only: (params: RawToolParamsObj) => {
@@ -205,7 +251,7 @@ export class ToolsService implements IToolsService {
 				} = params
 				const queryStr = validateStr('query', queryUnknown)
 				const pageNumber = validatePageNum(pageNumberUnknown)
-				const searchInFolder = validateOptionalURI(searchInFolderUnknown)
+				const searchInFolder = validateOptionalURI(searchInFolderUnknown, workspaceContextService)
 				const isRegex = validateBoolean(isRegexUnknown, { default: false })
 				return {
 					query: queryStr,
@@ -216,7 +262,7 @@ export class ToolsService implements IToolsService {
 			},
 			search_in_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, query: queryUnknown, is_regex: isRegexUnknown } = params;
-				const uri = validateURI(uriStr);
+				const uri = validateURI(uriStr, workspaceContextService);
 				const query = validateStr('query', queryUnknown);
 				const isRegex = validateBoolean(isRegexUnknown, { default: false });
 				return { uri, query, isRegex };
@@ -226,7 +272,7 @@ export class ToolsService implements IToolsService {
 				const {
 					uri: uriUnknown,
 				} = params
-				const uri = validateURI(uriUnknown)
+				const uri = validateURI(uriUnknown, workspaceContextService)
 				return { uri }
 			},
 
@@ -234,7 +280,7 @@ export class ToolsService implements IToolsService {
 
 			create_file_or_folder: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown } = params
-				const uri = validateURI(uriUnknown)
+				const uri = validateURI(uriUnknown, workspaceContextService)
 				const uriStr = validateStr('uri', uriUnknown)
 				const isFolder = checkIfIsFolder(uriStr)
 				return { uri, isFolder }
@@ -242,7 +288,7 @@ export class ToolsService implements IToolsService {
 
 			delete_file_or_folder: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, is_recursive: isRecursiveUnknown } = params
-				const uri = validateURI(uriUnknown)
+				const uri = validateURI(uriUnknown, workspaceContextService)
 				const isRecursive = validateBoolean(isRecursiveUnknown, { default: false })
 				const uriStr = validateStr('uri', uriUnknown)
 				const isFolder = checkIfIsFolder(uriStr)
@@ -251,14 +297,14 @@ export class ToolsService implements IToolsService {
 
 			rewrite_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, new_content: newContentUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const newContent = validateStr('newContent', newContentUnknown)
 				return { uri, newContent }
 			},
 
 			edit_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, search_replace_blocks: searchReplaceBlocksUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const searchReplaceBlocks = validateStr('searchReplaceBlocks', searchReplaceBlocksUnknown)
 				return { uri, searchReplaceBlocks }
 			},
