@@ -416,7 +416,8 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
     - You are only allowed to output ONE tool call, and it must be at the END of your response.
     - Your tool call will be executed immediately, and the results will appear in the following user message.
     - IMPORTANT: All file paths (uri parameter) must be ABSOLUTE paths starting from the workspace root. Use the workspace root path shown in system_info as the base for all file operations.
-    - When the user asks for a file by name, first use ls_dir or search_pathnames_only to find its full path, then use that full path in subsequent tool calls.`)
+    - When the user asks for a file by name, first use ls_dir or search_pathnames_only to find its full path, then use that full path in subsequent tool calls.
+    - FALLBACK: If your environment supports JSON tool calling but it fails, you may output the JSON object directly at the end of your message: {"name": "tool_name", "arguments": {"param": "value"}}`)
 
 	return `\
     ${toolXMLDefinitions}

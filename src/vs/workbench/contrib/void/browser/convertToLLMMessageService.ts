@@ -588,7 +588,12 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 				: `...Directories string cut off, ask user for more if necessary...`
 		})
 
-		const includeXMLToolDefinitions = !specialToolFormat
+		const { specialToolFormat, providerName } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, this.voidSettingsService.state.overridesOfModel)
+
+		// Include XML tool definitions if not using a native format, OR if using a local provider
+		// (local models often fail native tool calls and fallback to JSON/XML text)
+		const isLocalProvider = ['ollama', 'vLLM', 'lmStudio', 'openAICompatible'].includes(providerName)
+		const includeXMLToolDefinitions = !specialToolFormat || isLocalProvider
 
 		const mcpTools = this.mcpService.getMCPTools()
 

@@ -325,12 +325,12 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		onFinalMessage = newOnFinalMessage
 	}
 
-	// manually parse out tool results if XML
-	if (!specialToolFormat) {
-		const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools)
-		onText = newOnText
-		onFinalMessage = newOnFinalMessage
-	}
+	// manually parse out tool results from text (XML or JSON fallback)
+	// We enable this for all models, even if they have specialToolFormat, as a fallback
+	// for when models output JSON/XML as plain text instead of using native tool calls.
+	const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools)
+	onText = newOnText
+	onFinalMessage = newOnFinalMessage
 
 	let fullReasoningSoFar = ''
 	let fullTextSoFar = ''
@@ -512,12 +512,12 @@ const sendAnthropicChat = async ({ messages, providerName, onText, onFinalMessag
 
 	})
 
-	// manually parse out tool results if XML
-	if (!specialToolFormat) {
-		const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools)
-		onText = newOnText
-		onFinalMessage = newOnFinalMessage
-	}
+	// manually parse out tool results from text (XML or JSON fallback)
+	// We enable this for all models, even if they have specialToolFormat, as a fallback
+	// for when models output JSON/XML as plain text instead of using native tool calls.
+	const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools)
+	onText = newOnText
+	onFinalMessage = newOnFinalMessage
 
 	// when receive text
 	let fullText = ''
@@ -780,12 +780,12 @@ const sendGeminiChat = async ({
 	const genAI = new GoogleGenAI({ apiKey: thisConfig.apiKey });
 
 
-	// manually parse out tool results if XML
-	if (!specialToolFormat) {
-		const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools)
-		onText = newOnText
-		onFinalMessage = newOnFinalMessage
-	}
+	// manually parse out tool results from text (XML or JSON fallback)
+	// We enable this for all models, even if they have specialToolFormat, as a fallback
+	// for when models output JSON/XML as plain text instead of using native tool calls.
+	const { newOnText, newOnFinalMessage } = extractXMLToolsWrapper(onText, onFinalMessage, chatMode, mcpTools)
+	onText = newOnText
+	onFinalMessage = newOnFinalMessage
 
 	// when receive text
 	let fullReasoningSoFar = ''

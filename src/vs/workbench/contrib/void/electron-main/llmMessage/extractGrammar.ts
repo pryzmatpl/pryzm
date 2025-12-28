@@ -396,6 +396,17 @@ export const extractXMLToolsWrapper = (
 				toolOfToolName,
 			)
 		}
+		// Fallback: Try to detect JSON tool call during streaming
+		else if (!latestToolCall) {
+			const toolNames = tools.map(t => t.name)
+			const jsonToolCall = tryParseJSONToolCall(trueFullText, toolNames)
+			if (jsonToolCall) {
+				latestToolCall = jsonToolCall
+				// For JSON, we also want to hide it from the displayed text
+				const jsonPattern = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"[^"]+?"[\s\n]*,[\s\n]*"(?:arguments|parameters)"[\s\n]*:[\s\n]*\{[^}]*\}[\s\n]*\}/g
+				fullText = trueFullText.replace(jsonPattern, '').trimEnd()
+			}
+		}
 
 		onText({
 			...params,
