@@ -576,7 +576,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 
 
 	// system message
-	private _generateChatMessagesSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined) => {
+	private _generateChatMessagesSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, providerName: ProviderName) => {
 		const workspaceFolders = this.workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const openedURIs = this.modelService.getModels().filter(m => m.isAttachedToEditor()).map(m => m.uri.fsPath) || [];
@@ -587,8 +587,6 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 				`...Directories string cut off, use tools to read more...`
 				: `...Directories string cut off, ask user for more if necessary...`
 		})
-
-		const { specialToolFormat, providerName } = getModelCapabilities(modelSelection.providerName, modelSelection.modelName, this.voidSettingsService.state.overridesOfModel)
 
 		// Include XML tool definitions if not using a native format, OR if using a local provider
 		// (local models often fail native tool calls and fallback to JSON/XML text)
@@ -685,7 +683,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		} = getModelCapabilities(providerName, modelName, overridesOfModel)
 
 		const { disableSystemMessage } = this.voidSettingsService.state.globalSettings;
-		const fullSystemMessage = await this._generateChatMessagesSystemMessage(chatMode, specialToolFormat)
+		const fullSystemMessage = await this._generateChatMessagesSystemMessage(chatMode, specialToolFormat, providerName)
 		const systemMessage = disableSystemMessage ? '' : fullSystemMessage;
 
 		const modelSelectionOptions = this.voidSettingsService.state.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName]
