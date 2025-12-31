@@ -163,7 +163,7 @@ const paginationParam = {
 
 
 
-const terminalDescHelper = `You can use this tool to run any command: sed, grep, etc. Do not edit any files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), you should pipe to cat to get all results and not get stuck in vim.`
+const terminalDescHelper = `IMPORTANT: This is the ONLY way to run shell/terminal commands. Use this for ALL commands like: cargo, npm, git, make, python, sed, grep, ls, cat, etc. Do not edit files with this tool; use edit_file instead. When working with git and other tools that open an editor (e.g. git diff), pipe to cat to avoid getting stuck in vim.`
 
 const cwdHelper = 'Optional. The directory in which to run the command. Defaults to the first workspace folder.'
 
@@ -410,6 +410,8 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
 
 	const toolCallXMLGuidelines = (`\
     Tool calling details:
+    - ONLY use tools from the "Available tools" list above. Do NOT invent new tool names.
+    - To run ANY shell command (cargo, npm, git, python, make, etc.), use the run_command tool.
     - To call a tool, write its name and parameters in XML format as shown above.
     - After you write the tool call, you must STOP and WAIT for the result.
     - All parameters are REQUIRED unless noted otherwise.
@@ -427,6 +429,11 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
 
     2. JSON format (also supported):
        {"name": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}
+
+    EXAMPLE - Running a shell command:
+    <run_command>
+    <command>cargo fix --lib -p pdfscan</command>
+    </run_command>
 
     CRITICAL: When calling tools, output the tool call at the END of your message with NO additional text after it.`)
 

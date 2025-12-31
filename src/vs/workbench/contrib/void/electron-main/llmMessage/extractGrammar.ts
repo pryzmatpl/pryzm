@@ -183,6 +183,7 @@ const extractBalancedJSON = (text: string, startIdx: number): string | null => {
 // Try to detect and parse JSON tool calls that some models output as text
 // Handles multiple formats: {"name":"tool", "arguments":{...}}, {"name":"tool", "parameters":{...}}
 // Also handles tool calls wrapped in markdown code blocks
+// Also converts invented tool names (like "cargo fix") to run_command calls
 const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj | null => {
 	// Strip markdown code blocks that might wrap the JSON
 	let cleanText = text
@@ -290,6 +291,98 @@ const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj
 					isDone: true,
 					id: generateUuid(),
 				}
+			}
+		}
+	}
+
+	// FALLBACK: Detect invented tool names that look like commands and convert to run_command
+	// e.g., {"name": "cargo fix", "arguments": ["--lib", "-p", "pdfscan"]}
+	// or {"name": "npm install", "arguments": {"package": "lodash"}}
+	if (toolNames.includes('run_command')) {
+		const inventedToolPattern = /"name"\s*:\s*"([^"]+)"/g
+		let match: RegExpExecArray | null
+
+		while ((match = inventedToolPattern.exec(cleanText)) !== null) {
+			const inventedName = match[1]
+
+			// Skip if it's a known tool
+			if (toolNames.includes(inventedName)) continue
+
+			// Check if it looks like a command (contains common command patterns)
+			const commandPatterns = [
+				/^(cargo|npm|yarn|pnpm|git|make|cmake|python|pip|node|deno|bun|rustc|gcc|clang|go|java|mvn|gradle|docker|kubectl|terraform|ansible)\b/i,
+				/\s+(install|build|run|test|fix|lint|format|clean|deploy|init|start|stop)\b/i,
+				/^[a-z]+\s+[a-z-]+/i, // generic "command subcommand" pattern
+			]
+
+			const looksLikeCommand = commandPatterns.some(p => p.test(inventedName))
+			if (!looksLikeCommand) continue
+
+			// Find the start of this JSON object
+			let braceDepth = 0
+			let startIdx = -1
+
+			for (let i = match.index; i >= 0; i--) {
+				const char = cleanText[i]
+				if (char === '}') braceDepth++
+				else if (char === '{') {
+					if (braceDepth === 0) {
+						startIdx = i
+						break
+					}
+					braceDepth--
+				}
+			}
+
+			if (startIdx === -1) continue
+
+			const jsonStr = extractBalancedJSON(cleanText, startIdx)
+			if (!jsonStr) continue
+
+			try {
+				const parsed = JSON.parse(jsonStr)
+				if (parsed.name !== inventedName) continue
+
+				// Build the command string
+				let commandStr = inventedName
+				const args = parsed.arguments || parsed.parameters
+
+				if (Array.isArray(args)) {
+					// Arguments as array: ["--lib", "-p", "pdfscan"]
+					commandStr += ' ' + args.join(' ')
+				} else if (typeof args === 'object' && args !== null) {
+					// Arguments as object: {"flag": "--lib", "package": "pdfscan"}
+					// Try to construct a reasonable command
+					const argParts: string[] = []
+					for (const key in args) {
+						const val = args[key]
+						if (typeof val === 'string') {
+							// If key looks like a flag name, use it
+							if (key.startsWith('-') || key === 'flag' || key === 'option') {
+								argParts.push(val)
+							} else {
+								argParts.push(val)
+							}
+						}
+					}
+					if (argParts.length > 0) {
+						commandStr += ' ' + argParts.join(' ')
+					}
+				} else if (typeof args === 'string') {
+					commandStr += ' ' + args
+				}
+
+				console.log('[Tool Detection] Converted invented tool to run_command:', { inventedName, commandStr })
+
+				return {
+					name: 'run_command' as ToolName,
+					rawParams: { command: commandStr },
+					doneParams: ['command'] as any[],
+					isDone: true,
+					id: generateUuid(),
+				}
+			} catch (e) {
+				// JSON parse failed
 			}
 		}
 	}
