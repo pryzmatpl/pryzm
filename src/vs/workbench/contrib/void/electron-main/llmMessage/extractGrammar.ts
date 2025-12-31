@@ -141,51 +141,148 @@ export const extractReasoningWrapper = (
 
 // =============== tools (JSON fallback) ===============
 
+// Extract balanced JSON object starting at a given position (handles nested braces)
+const extractBalancedJSON = (text: string, startIdx: number): string | null => {
+	if (text[startIdx] !== '{') return null
+
+	let depth = 0
+	let inString = false
+	let escapeNext = false
+
+	for (let i = startIdx; i < text.length; i++) {
+		const char = text[i]
+
+		if (escapeNext) {
+			escapeNext = false
+			continue
+		}
+
+		if (char === '\\' && inString) {
+			escapeNext = true
+			continue
+		}
+
+		if (char === '"') {
+			inString = !inString
+			continue
+		}
+
+		if (inString) continue
+
+		if (char === '{') depth++
+		else if (char === '}') {
+			depth--
+			if (depth === 0) {
+				return text.substring(startIdx, i + 1)
+			}
+		}
+	}
+	return null
+}
+
 // Try to detect and parse JSON tool calls that some models output as text
-// Format: {"name":"tool_name", "arguments":{"param":"value"}}
+// Handles multiple formats: {"name":"tool", "arguments":{...}}, {"name":"tool", "parameters":{...}}
+// Also handles tool calls wrapped in markdown code blocks
 const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj | null => {
-	// Look for JSON object pattern that contains "name" and "arguments"
-	const jsonPattern = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"([^"]+)"[\s\n]*,[\s\n]*"arguments"[\s\n]*:[\s\n]*(\{[^}]*\})[\s\n]*\}/g
+	// Strip markdown code blocks that might wrap the JSON
+	let cleanText = text
+	// Match ```json ... ``` or ``` ... ```
+	const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+	if (codeBlockMatch) {
+		cleanText = codeBlockMatch[1].trim()
+	}
 
-	let match: RegExpExecArray | null
-	while ((match = jsonPattern.exec(text)) !== null) {
-		const toolName = match[1]
-		const argsStr = match[2]
+	// Try multiple search strategies
+	const searchTexts = [cleanText, text]
 
-		// Check if this is a valid tool name
-		if (toolNames.includes(toolName)) {
-			try {
-				const args = JSON.parse(argsStr)
-				const rawParams: RawToolParamsObj = {}
-				for (const key in args) {
-					rawParams[key] = String(args[key])
+	for (const searchText of searchTexts) {
+		// Find potential JSON objects containing tool names
+		for (const toolName of toolNames) {
+			// Search for "name": "toolName" pattern
+			const namePatterns = [
+				`"name"\\s*:\\s*"${toolName}"`,
+				`'name'\\s*:\\s*'${toolName}'`,
+			]
+
+			for (const pattern of namePatterns) {
+				const regex = new RegExp(pattern, 'g')
+				let match: RegExpExecArray | null
+
+				while ((match = regex.exec(searchText)) !== null) {
+					// Find the start of this JSON object by scanning backwards for '{'
+					let braceDepth = 0
+					let startIdx = -1
+
+					for (let i = match.index; i >= 0; i--) {
+						const char = searchText[i]
+						if (char === '}') braceDepth++
+						else if (char === '{') {
+							if (braceDepth === 0) {
+								startIdx = i
+								break
+							}
+							braceDepth--
+						}
+					}
+
+					if (startIdx === -1) continue
+
+					// Extract the balanced JSON
+					const jsonStr = extractBalancedJSON(searchText, startIdx)
+					if (!jsonStr) continue
+
+					try {
+						const parsed = JSON.parse(jsonStr)
+
+						// Validate it has the expected structure
+						if (parsed.name !== toolName) continue
+
+						const argsObj = parsed.arguments || parsed.parameters || {}
+						const rawParams: RawToolParamsObj = {}
+
+						for (const key in argsObj) {
+							const val = argsObj[key]
+							rawParams[key] = typeof val === 'string' ? val : JSON.stringify(val)
+						}
+
+						console.log('[Tool Detection] Successfully parsed JSON tool call:', { toolName, rawParams })
+
+						return {
+							name: toolName as ToolName,
+							rawParams,
+							doneParams: Object.keys(rawParams) as any[],
+							isDone: true,
+							id: generateUuid(),
+						}
+					} catch (e) {
+						// JSON parse failed, continue searching
+						console.log('[Tool Detection] JSON parse failed:', e)
+					}
 				}
-				return {
-					name: toolName as ToolName,
-					rawParams,
-					doneParams: Object.keys(rawParams) as any[],
-					isDone: true,
-					id: generateUuid(),
-				}
-			} catch (e) {
-				// JSON parse failed, continue looking
 			}
 		}
 	}
 
-	// Also try format with "parameters" instead of "arguments"
-	const jsonPattern2 = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"([^"]+)"[\s\n]*,[\s\n]*"parameters"[\s\n]*:[\s\n]*(\{[^}]*\})[\s\n]*\}/g
-	while ((match = jsonPattern2.exec(text)) !== null) {
-		const toolName = match[1]
-		const argsStr = match[2]
+	// Fallback: Try to find function-call style output (Qwen sometimes uses this)
+	// Format: tool_name(param1="value1", param2="value2")
+	for (const toolName of toolNames) {
+		const funcCallRegex = new RegExp(`${toolName}\\s*\\(([^)]+)\\)`, 'g')
+		let match: RegExpExecArray | null
 
-		if (toolNames.includes(toolName)) {
-			try {
-				const args = JSON.parse(argsStr)
-				const rawParams: RawToolParamsObj = {}
-				for (const key in args) {
-					rawParams[key] = String(args[key])
-				}
+		while ((match = funcCallRegex.exec(text)) !== null) {
+			const argsStr = match[1]
+			const rawParams: RawToolParamsObj = {}
+
+			// Parse key="value" or key='value' pairs
+			const paramRegex = /(\w+)\s*=\s*["']([^"']+)["']/g
+			let paramMatch: RegExpExecArray | null
+
+			while ((paramMatch = paramRegex.exec(argsStr)) !== null) {
+				rawParams[paramMatch[1]] = paramMatch[2]
+			}
+
+			if (Object.keys(rawParams).length > 0) {
+				console.log('[Tool Detection] Parsed function-call style:', { toolName, rawParams })
 				return {
 					name: toolName as ToolName,
 					rawParams,
@@ -193,8 +290,6 @@ const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj
 					isDone: true,
 					id: generateUuid(),
 				}
-			} catch (e) {
-				// JSON parse failed, continue looking
 			}
 		}
 	}
@@ -323,6 +418,95 @@ const parseXMLPrefixToToolCall = <T extends ToolName,>(toolName: T, toolId: stri
 	}
 }
 
+// Try to find XML tool calls with flexible whitespace/newline handling
+// Handles: <tool_name>\n<param>value</param>\n</tool_name>
+const tryParseFlexibleXMLToolCall = (text: string, toolNames: string[], toolOfToolName: ToolOfToolName): RawToolCallObj | null => {
+	for (const toolName of toolNames) {
+		// Match opening tag with flexible whitespace
+		const openTagRegex = new RegExp(`<\\s*${toolName}\\s*>`, 'i')
+		const openMatch = openTagRegex.exec(text)
+		if (!openMatch) continue
+
+		const startIdx = openMatch.index
+
+		// Find matching close tag
+		const closeTagRegex = new RegExp(`</\\s*${toolName}\\s*>`, 'i')
+		const closeMatch = closeTagRegex.exec(text.substring(startIdx + openMatch[0].length))
+
+		const innerContent = closeMatch
+			? text.substring(startIdx + openMatch[0].length, startIdx + openMatch[0].length + closeMatch.index)
+			: text.substring(startIdx + openMatch[0].length)
+
+		const isDone = !!closeMatch
+		const rawParams: RawToolParamsObj = {}
+		const doneParams: string[] = []
+
+		// Extract parameters from inner content
+		const toolInfo = toolOfToolName[toolName]
+		if (toolInfo) {
+			for (const paramName of Object.keys(toolInfo.params)) {
+				// Flexible param tag matching
+				const paramOpenRegex = new RegExp(`<\\s*${paramName}\\s*>`, 'i')
+				const paramCloseRegex = new RegExp(`</\\s*${paramName}\\s*>`, 'i')
+
+				const paramOpenMatch = paramOpenRegex.exec(innerContent)
+				if (!paramOpenMatch) continue
+
+				const afterOpen = innerContent.substring(paramOpenMatch.index + paramOpenMatch[0].length)
+				const paramCloseMatch = paramCloseRegex.exec(afterOpen)
+
+				if (paramCloseMatch) {
+					rawParams[paramName] = trimBeforeAndAfterNewLines(afterOpen.substring(0, paramCloseMatch.index))
+					doneParams.push(paramName)
+				} else {
+					// Param opened but not closed - take rest as value
+					rawParams[paramName] = trimBeforeAndAfterNewLines(afterOpen)
+				}
+			}
+		}
+
+		if (Object.keys(rawParams).length > 0 || isDone) {
+			console.log('[Tool Detection] Parsed flexible XML tool call:', { toolName, rawParams, isDone })
+			return {
+				name: toolName as ToolName,
+				rawParams,
+				doneParams: doneParams as any[],
+				isDone,
+				id: generateUuid(),
+			}
+		}
+	}
+	return null
+}
+
+// Remove tool call text from displayed content
+const removeToolCallFromText = (text: string, toolNames: string[]): string => {
+	let result = text
+
+	// Remove XML tool calls
+	for (const toolName of toolNames) {
+		const xmlPattern = new RegExp(`<\\s*${toolName}[\\s\\S]*?(?:</\\s*${toolName}\\s*>|$)`, 'gi')
+		result = result.replace(xmlPattern, '')
+	}
+
+	// Remove JSON tool calls (including those in code blocks)
+	result = result.replace(/```(?:json)?\s*\{[\s\S]*?"name"\s*:\s*"[^"]+?"[\s\S]*?\}\s*```/gi, '')
+
+	// Remove standalone JSON tool calls at end
+	for (const toolName of toolNames) {
+		const jsonPattern = new RegExp(`\\{[\\s\\S]*?"name"\\s*:\\s*"${toolName}"[\\s\\S]*?\\}\\s*$`, 'i')
+		result = result.replace(jsonPattern, '')
+	}
+
+	// Remove function-call style
+	for (const toolName of toolNames) {
+		const funcPattern = new RegExp(`${toolName}\\s*\\([^)]*\\)\\s*$`, 'i')
+		result = result.replace(funcPattern, '')
+	}
+
+	return result.trimEnd()
+}
+
 export const extractXMLToolsWrapper = (
 	onText: OnText,
 	onFinalMessage: OnFinalMessage,
@@ -336,6 +520,7 @@ export const extractXMLToolsWrapper = (
 
 	const toolOfToolName: ToolOfToolName = {}
 	const toolOpenTags = tools.map(t => `<${t.name}>`)
+	const toolNames = tools.map(t => t.name)
 	for (const t of tools) { toolOfToolName[t.name] = t }
 
 	const toolId = generateUuid()
@@ -354,15 +539,11 @@ export const extractXMLToolsWrapper = (
 		prevFullTextLen = params.fullText.length
 		trueFullText = params.fullText
 
-		// console.log('NEWTEXT', JSON.stringify(newText))
-
-
 		if (foundOpenTag === null) {
 			const newFullText = openToolTagBuffer + newText
 			// ensure the code below doesn't run if only half a tag has been written
 			const isPartial = findPartiallyWrittenToolTagAtEnd(newFullText, toolOpenTags)
 			if (isPartial) {
-				// console.log('--- partial!!!')
 				openToolTagBuffer += newText
 			}
 			// if no tooltag is partially written at the end, attempt to get the index
@@ -376,14 +557,11 @@ export const extractXMLToolsWrapper = (
 				if (i !== null) {
 					const [idx, toolTag] = i
 					const toolName = toolTag.substring(1, toolTag.length - 1) as ToolName
-					// console.log('found ', toolName)
 					foundOpenTag = { idx, toolName }
 
 					// do not count anything at or after i in fullText
 					fullText = fullText.substring(0, idx)
 				}
-
-
 			}
 		}
 
@@ -396,15 +574,20 @@ export const extractXMLToolsWrapper = (
 				toolOfToolName,
 			)
 		}
-		// Fallback: Try to detect JSON tool call during streaming
+		// Fallback: Try to detect JSON or flexible XML tool call during streaming
 		else if (!latestToolCall) {
-			const toolNames = tools.map(t => t.name)
+			// Try JSON first (Qwen's common output)
 			const jsonToolCall = tryParseJSONToolCall(trueFullText, toolNames)
 			if (jsonToolCall) {
 				latestToolCall = jsonToolCall
-				// For JSON, we also want to hide it from the displayed text
-				const jsonPattern = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"[^"]+?"[\s\n]*,[\s\n]*"(?:arguments|parameters)"[\s\n]*:[\s\n]*\{[^}]*\}[\s\n]*\}/g
-				fullText = trueFullText.replace(jsonPattern, '').trimEnd()
+				fullText = removeToolCallFromText(trueFullText, toolNames)
+			} else {
+				// Try flexible XML parsing
+				const flexibleXmlCall = tryParseFlexibleXMLToolCall(trueFullText, toolNames, toolOfToolName)
+				if (flexibleXmlCall) {
+					latestToolCall = flexibleXmlCall
+					fullText = removeToolCallFromText(trueFullText, toolNames)
+				}
 			}
 		}
 
@@ -423,31 +606,39 @@ export const extractXMLToolsWrapper = (
 		fullText = fullText.trimEnd()
 		let toolCall = latestToolCall
 
-		// If no XML tool call found, try to parse JSON tool calls as fallback
-		// Some models (like Qwen via Ollama) output JSON instead of XML
+		// If no tool call found yet, try all detection methods
 		if (!toolCall) {
-			const toolNames = tools.map(t => t.name)
+			// 1. Try JSON parsing (most common for Qwen/Ollama)
 			const jsonToolCall = tryParseJSONToolCall(trueFullText, toolNames)
 			if (jsonToolCall) {
 				toolCall = jsonToolCall
-				// Remove the JSON from the displayed text
-				const jsonPattern = /\{[\s\n]*"name"[\s\n]*:[\s\n]*"[^"]+?"[\s\n]*,[\s\n]*"(?:arguments|parameters)"[\s\n]*:[\s\n]*\{[^}]*\}[\s\n]*\}/g
-				fullText = trueFullText.replace(jsonPattern, '').trimEnd()
-				console.log('[PRYZM Tool Detection] Found JSON tool call as fallback')
+				fullText = removeToolCallFromText(trueFullText, toolNames)
+				console.log('[Tool Detection] Final: Found JSON tool call')
 			}
 		}
 
-		console.log('[PRYZM Tool Detection] Final message received:', {
+		if (!toolCall) {
+			// 2. Try flexible XML parsing
+			const flexibleXmlCall = tryParseFlexibleXMLToolCall(trueFullText, toolNames, toolOfToolName)
+			if (flexibleXmlCall) {
+				toolCall = flexibleXmlCall
+				fullText = removeToolCallFromText(trueFullText, toolNames)
+				console.log('[Tool Detection] Final: Found flexible XML tool call')
+			}
+		}
+
+		// Clean up displayed text if we found a tool
+		if (toolCall && fullText === trueFullText) {
+			fullText = removeToolCallFromText(trueFullText, toolNames)
+		}
+
+		console.log('[Tool Detection] Final message:', {
 			hasToolCall: !!toolCall,
 			toolName: toolCall?.name,
 			toolIsDone: toolCall?.isDone,
+			rawParams: toolCall?.rawParams,
 			foundOpenTag: foundOpenTag,
-			fullTextLength: fullText.length,
-			trueFullTextLength: trueFullText.length,
 		})
-		if (toolCall) {
-			console.log('[PRYZM Tool Detection] Parsed tool call:', JSON.stringify(toolCall, null, 2))
-		}
 
 		onFinalMessage({ ...params, fullText, toolCall: toolCall })
 	}
@@ -473,3 +664,4 @@ const trimBeforeAndAfterNewLines = (s: string) => {
 
 	return s
 }
+
