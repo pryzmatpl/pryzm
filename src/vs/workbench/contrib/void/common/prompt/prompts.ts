@@ -267,6 +267,23 @@ export const builtinTools: {
 		},
 	},
 
+	read_pdf: {
+		name: 'read_pdf',
+		description: `Extracts and returns the text content from a PDF file. Use this tool to read PDF documents.`,
+		params: {
+			...uriParam('PDF file'),
+			...paginationParam,
+		},
+	},
+
+	read_screenshot: {
+		name: 'read_screenshot',
+		description: `Captures a screenshot from the clipboard or active window and extracts text using OCR. Use this when the user wants to analyze content from a screenshot, PDF viewer, or any visual content. The screenshot is automatically processed to extract readable text.`,
+		params: {
+			source: { description: 'Optional. Either "clipboard" to read from clipboard (default) or "window" to capture the active window. Default is "clipboard".' },
+		},
+	},
+
 	// --- editing (create/delete) ---
 
 	create_file_or_folder: {

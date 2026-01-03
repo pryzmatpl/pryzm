@@ -141,6 +141,134 @@ export const extractReasoningWrapper = (
 
 // =============== tools (JSON fallback) ===============
 
+// Map common wrong/invented tool names to actual tool names
+const toolNameAliases: { [alias: string]: string } = {
+	// Lint variations
+	'read_lint_warnings': 'read_lint_errors',
+	'read_lints': 'read_lint_errors',
+	'get_lint_errors': 'read_lint_errors',
+	'get_lints': 'read_lint_errors',
+	'lint_file': 'read_lint_errors',
+	'check_lint': 'read_lint_errors',
+	// File reading variations
+	'read': 'read_file',
+	'get_file': 'read_file',
+	'open_file': 'read_file',
+	'cat': 'read_file',
+	'view_file': 'read_file',
+	// PDF reading variations
+	'read_pdf_file': 'read_pdf',
+	'extract_pdf': 'read_pdf',
+	'pdf_text': 'read_pdf',
+	'parse_pdf': 'read_pdf',
+	// Screenshot/OCR variations
+	'screenshot': 'read_screenshot',
+	'ocr': 'read_screenshot',
+	'extract_text': 'read_screenshot',
+	'read_image': 'read_screenshot',
+	'image_to_text': 'read_screenshot',
+	// Directory variations
+	'list_dir': 'ls_dir',
+	'list_directory': 'ls_dir',
+	'ls': 'ls_dir',
+	'dir': 'ls_dir',
+	'list_files': 'ls_dir',
+	// Search variations
+	'search': 'search_for_files',
+	'find': 'search_pathnames_only',
+	'find_file': 'search_pathnames_only',
+	'grep': 'search_for_files',
+	'search_files': 'search_for_files',
+	// Edit variations
+	'edit': 'edit_file',
+	'modify_file': 'edit_file',
+	'update_file': 'edit_file',
+	'write_file': 'rewrite_file',
+	'create_file': 'create_file_or_folder',
+	'delete_file': 'delete_file_or_folder',
+	'remove_file': 'delete_file_or_folder',
+	'mkdir': 'create_file_or_folder',
+	'rmdir': 'delete_file_or_folder',
+	// Terminal variations
+	'execute': 'run_command',
+	'exec': 'run_command',
+	'shell': 'run_command',
+	'terminal': 'run_command',
+	'bash': 'run_command',
+	'sh': 'run_command',
+	'cmd': 'run_command',
+}
+
+// Map common wrong parameter names to correct ones
+const paramNameAliases: { [alias: string]: string } = {
+	'file_path': 'uri',
+	'filepath': 'uri',
+	'path': 'uri',
+	'file': 'uri',
+	'filename': 'uri',
+	'dir': 'uri',
+	'directory': 'uri',
+	'folder': 'uri',
+	'cmd': 'command',
+	'exec': 'command',
+	'shell_command': 'command',
+	'args': 'command',
+	'search': 'query',
+	'search_query': 'query',
+	'pattern': 'query',
+	'term': 'query',
+	'text': 'query',
+	'content': 'new_content',
+	'new_contents': 'new_content',
+	'file_content': 'new_content',
+	'blocks': 'search_replace_blocks',
+	'changes': 'search_replace_blocks',
+	'edits': 'search_replace_blocks',
+	'replacements': 'search_replace_blocks',
+	'start': 'start_line',
+	'end': 'end_line',
+	'from_line': 'start_line',
+	'to_line': 'end_line',
+	'line_start': 'start_line',
+	'line_end': 'end_line',
+	'cwd_path': 'cwd',
+	'working_dir': 'cwd',
+	'working_directory': 'cwd',
+}
+
+// Normalize a tool name using aliases
+const normalizeToolName = (name: string, validToolNames: string[]): string => {
+	// Direct match
+	if (validToolNames.includes(name)) return name
+
+	// Check aliases
+	const aliased = toolNameAliases[name.toLowerCase()]
+	if (aliased && validToolNames.includes(aliased)) return aliased
+
+	// Fuzzy match: check if the name is very close to a valid tool
+	const nameLower = name.toLowerCase().replace(/[_-]/g, '')
+	for (const validName of validToolNames) {
+		const validLower = validName.toLowerCase().replace(/[_-]/g, '')
+		if (nameLower === validLower) return validName
+		// Check if one contains the other
+		if (nameLower.includes(validLower) || validLower.includes(nameLower)) {
+			return validName
+		}
+	}
+
+	return name // Return original if no match
+}
+
+// Normalize parameter names using aliases
+const normalizeParams = (params: RawToolParamsObj): RawToolParamsObj => {
+	const normalized: RawToolParamsObj = {}
+	for (const key in params) {
+		const normalizedKey = paramNameAliases[key.toLowerCase()] || key
+		normalized[normalizedKey] = params[key]
+	}
+	return normalized
+}
+
 // Extract balanced JSON object starting at a given position (handles nested braces)
 const extractBalancedJSON = (text: string, startIdx: number): string | null => {
 	if (text[startIdx] !== '{') return null
@@ -184,6 +312,7 @@ const extractBalancedJSON = (text: string, startIdx: number): string | null => {
 // Handles multiple formats: {"name":"tool", "arguments":{...}}, {"name":"tool", "parameters":{...}}
 // Also handles tool calls wrapped in markdown code blocks
 // Also converts invented tool names (like "cargo fix") to run_command calls
+// Also normalizes misspelled tool names and parameter names
 const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj | null => {
 	// Strip markdown code blocks that might wrap the JSON
 	let cleanText = text
@@ -196,6 +325,7 @@ const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj
 	// Try multiple search strategies
 	const searchTexts = [cleanText, text]
 
+	// First pass: Try exact tool name matches
 	for (const searchText of searchTexts) {
 		// Find potential JSON objects containing tool names
 		for (const toolName of toolNames) {
@@ -239,12 +369,15 @@ const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj
 						if (parsed.name !== toolName) continue
 
 						const argsObj = parsed.arguments || parsed.parameters || {}
-						const rawParams: RawToolParamsObj = {}
+						let rawParams: RawToolParamsObj = {}
 
 						for (const key in argsObj) {
 							const val = argsObj[key]
 							rawParams[key] = typeof val === 'string' ? val : JSON.stringify(val)
 						}
+
+						// Normalize parameter names
+						rawParams = normalizeParams(rawParams)
 
 						console.log('[Tool Detection] Successfully parsed JSON tool call:', { toolName, rawParams })
 
@@ -260,6 +393,71 @@ const tryParseJSONToolCall = (text: string, toolNames: string[]): RawToolCallObj
 						console.log('[Tool Detection] JSON parse failed:', e)
 					}
 				}
+			}
+		}
+	}
+
+	// Second pass: Try to find ANY "name" field and normalize it
+	for (const searchText of searchTexts) {
+		const anyNamePattern = /"name"\s*:\s*"([^"]+)"/g
+		let match: RegExpExecArray | null
+
+		while ((match = anyNamePattern.exec(searchText)) !== null) {
+			const foundName = match[1]
+
+			// Try to normalize this name to a valid tool
+			const normalizedName = normalizeToolName(foundName, toolNames)
+
+			// Skip if we couldn't normalize it to a valid tool
+			if (!toolNames.includes(normalizedName)) continue
+
+			// Find the start of this JSON object
+			let braceDepth = 0
+			let startIdx = -1
+
+			for (let i = match.index; i >= 0; i--) {
+				const char = searchText[i]
+				if (char === '}') braceDepth++
+				else if (char === '{') {
+					if (braceDepth === 0) {
+						startIdx = i
+						break
+					}
+					braceDepth--
+				}
+			}
+
+			if (startIdx === -1) continue
+
+			const jsonStr = extractBalancedJSON(searchText, startIdx)
+			if (!jsonStr) continue
+
+			try {
+				const parsed = JSON.parse(jsonStr)
+				if (parsed.name !== foundName) continue
+
+				const argsObj = parsed.arguments || parsed.parameters || {}
+				let rawParams: RawToolParamsObj = {}
+
+				for (const key in argsObj) {
+					const val = argsObj[key]
+					rawParams[key] = typeof val === 'string' ? val : JSON.stringify(val)
+				}
+
+				// Normalize parameter names
+				rawParams = normalizeParams(rawParams)
+
+				console.log('[Tool Detection] Normalized tool call:', { original: foundName, normalized: normalizedName, rawParams })
+
+				return {
+					name: normalizedName as ToolName,
+					rawParams,
+					doneParams: Object.keys(rawParams) as any[],
+					isDone: true,
+					id: generateUuid(),
+				}
+			} catch (e) {
+				// JSON parse failed
 			}
 		}
 	}

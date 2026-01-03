@@ -19,6 +19,10 @@ import { RawToolParamsObj } from '../common/sendLLMMessageTypes.js'
 import { MAX_CHILDREN_URIs_PAGE, MAX_FILE_CHARS_PAGE, MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js'
 import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
+import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
+import { IScreenshotService } from './screenshotService.js'
+import { VSBuffer } from '../../../../base/common/buffer.js'
+import { encodeBase64 } from '../../../../base/common/buffer.js'
 
 
 // tool use for AI
@@ -189,6 +193,8 @@ export class ToolsService implements IToolsService {
 		@IDirectoryStrService private readonly directoryStrService: IDirectoryStrService,
 		@IMarkerService private readonly markerService: IMarkerService,
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
+		@IMainProcessService private readonly mainProcessService: IMainProcessService,
+		@IScreenshotService private readonly screenshotService: IScreenshotService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 
@@ -274,6 +280,19 @@ export class ToolsService implements IToolsService {
 				} = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
 				return { uri }
+			},
+
+			read_pdf: (params: RawToolParamsObj) => {
+				const { uri: uriStr, page_number: pageNumberUnknown } = params
+				const uri = validateURI(uriStr, workspaceContextService)
+				const pageNumber = validatePageNum(pageNumberUnknown)
+				return { uri, pageNumber }
+			},
+
+			read_screenshot: (params: RawToolParamsObj) => {
+				const { source: sourceUnknown } = params;
+				const source = sourceUnknown === 'window' ? 'window' : 'clipboard';
+				return { source };
 			},
 
 			// ---
@@ -477,6 +496,42 @@ export class ToolsService implements IToolsService {
 				return { result: { lintErrors } }
 			},
 
+			read_pdf: async ({ uri, pageNumber }) => {
+				const pdfChannel = this.mainProcessService.getChannel('void-channel-pdfReader')
+				const result = await pdfChannel.call<BuiltinToolResultType['read_pdf']>('readPDF', {
+					uri: uri.toString(),
+					pageNumber,
+				})
+				return { result }
+			},
+
+			read_screenshot: async ({ source }) => {
+				let imageData: ArrayBuffer | null;
+
+				if (source === 'clipboard') {
+					imageData = await this.screenshotService.captureFromClipboard();
+				} else {
+					imageData = await this.screenshotService.captureFromWindow();
+				}
+
+				if (!imageData) {
+					throw new Error(`Failed to capture screenshot from ${source}. Make sure an image is in the clipboard or the window is visible.`);
+				}
+
+				// Convert ArrayBuffer to base64 for IPC
+				const vsBuffer = VSBuffer.wrap(new Uint8Array(imageData));
+				const base64Image = encodeBase64(vsBuffer);
+
+				// Call OCR channel
+				const ocrChannel = this.mainProcessService.getChannel('void-channel-ocr');
+				const result = await ocrChannel.call<BuiltinToolResultType['read_screenshot']>('performOCR', {
+					imageData: base64Image,
+					source,
+				});
+
+				return { result };
+			},
+
 			// ---
 
 			create_file_or_folder: async ({ uri, isFolder }) => {
@@ -591,6 +646,17 @@ export class ToolsService implements IToolsService {
 				return result.lintErrors ?
 					stringifyLintErrors(result.lintErrors)
 					: 'No lint errors found.'
+			},
+			read_pdf: (params, result) => {
+				const pageInfo = result.totalPages > 1
+					? `\n\nPage ${result.currentPage} of ${result.totalPages}`
+					: ''
+				const nextPageStr = result.hasNextPage ? '\n\n(more on next page...)' : ''
+				return `${params.uri.fsPath}${pageInfo}\n\`\`\`\n${result.text}\n\`\`\`${nextPageStr}`
+			},
+			read_screenshot: (params, result) => {
+				const confidenceStr = result.confidence ? ` (confidence: ${result.confidence.toFixed(2)}%)` : '';
+				return `Text extracted from screenshot${confidenceStr}:\n\`\`\`\n${result.text}\n\`\`\``;
 			},
 			// ---
 			create_file_or_folder: (params, result) => {

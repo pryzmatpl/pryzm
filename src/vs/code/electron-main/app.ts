@@ -133,6 +133,8 @@ import { LLMMessageChannel } from '../../workbench/contrib/void/electron-main/se
 import { VoidSCMService } from '../../workbench/contrib/void/electron-main/voidSCMMainService.js';
 import { IVoidSCMService } from '../../workbench/contrib/void/common/voidSCMTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
+import { PDFReaderChannel } from '../../workbench/contrib/void/electron-main/pdfReaderChannel.js';
+import { OCRChannel } from '../../workbench/contrib/void/electron-main/ocrChannel.js';
 /**
  * The main VS Code application. There will only ever be one instance,
  * even if the user starts many instances (e.g. from the command line).
@@ -1253,6 +1255,14 @@ export class CodeApplication extends Disposable {
 		// Void added this
 		const mcpChannel = new MCPChannel();
 		mainProcessElectronServer.registerChannel('void-channel-mcp', mcpChannel);
+
+		// Void PDF Reader
+		const pdfReaderChannel = new PDFReaderChannel();
+		mainProcessElectronServer.registerChannel('void-channel-pdfReader', pdfReaderChannel);
+
+		// Void OCR Service
+		const ocrChannel = new OCRChannel();
+		mainProcessElectronServer.registerChannel('void-channel-ocr', ocrChannel);
 
 		// Extension Host Debug Broadcasting
 		const electronExtensionHostDebugBroadcastChannel = new ElectronExtensionHostDebugBroadcastChannel(accessor.get(IWindowsMainService));

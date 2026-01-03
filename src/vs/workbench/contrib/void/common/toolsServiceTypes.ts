@@ -50,6 +50,8 @@ export type BuiltinToolCallParams = {
 	'search_for_files': { query: string, isRegex: boolean, searchInFolder: URI | null, pageNumber: number },
 	'search_in_file': { uri: URI, query: string, isRegex: boolean },
 	'read_lint_errors': { uri: URI },
+	'read_pdf': { uri: URI, pageNumber: number },
+	'read_screenshot': { source: 'clipboard' | 'window' },
 	// ---
 	'rewrite_file': { uri: URI, newContent: string },
 	'edit_file': { uri: URI, searchReplaceBlocks: string },
@@ -71,6 +73,8 @@ export type BuiltinToolResultType = {
 	'search_for_files': { uris: URI[], hasNextPage: boolean },
 	'search_in_file': { lines: number[]; },
 	'read_lint_errors': { lintErrors: LintErrorItem[] | null },
+	'read_pdf': { text: string, totalPages: number, currentPage: number, hasNextPage: boolean },
+	'read_screenshot': { text: string, confidence?: number },
 	// ---
 	'rewrite_file': Promise<{ lintErrors: LintErrorItem[] | null }>,
 	'edit_file': Promise<{ lintErrors: LintErrorItem[] | null }>,
